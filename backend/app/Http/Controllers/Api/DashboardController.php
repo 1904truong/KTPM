@@ -1,0 +1,205 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use App\Models\Student;
+use App\Models\Attendance;
+use App\Models\Invoice;
+use Carbon\Carbon;
+
+class DashboardController extends Controller
+{
+    public function index(Request $request)
+    {
+        $month = (int)$request->get('month', date('m'));
+        $year  = (int)$request->get('year', date('Y'));
+
+        // Chu kỳ chốt học phí ngày 20
+        $endDate   = Carbon::createFromDate($year, $month, 20)->endOfDay();
+        $startDate = Carbon::createFromDate($year, $month, 20)->subMonth()->addDay()->startOfDay();
+
+        // 1. DOANH THU THÁNG & NĂM
+        // MySQL or SQLite group functions have slightly different date extraction, but here we can keep the simple sums for single month/year.
+        $monthlyRevenue = Invoice::whereYear('paid_at', $year)
+            ->whereMonth('paid_at', $month)
+            ->sum('amount');
+
+        $yearlyRevenue = Invoice::whereYear('paid_at', $year)->sum('amount');
+
+        // 2. SĨ SỐ VÀ BIẾN ĐỘNG HỌC SINH
+        $totalActiveStudents = Student::where('status', 'active')->count();
+
+        $studentsInMonth = Student::whereBetween('start_date', [$startDate, $endDate])->count();
+
+        $studentsOutMonth = Student::whereIn('status', ['paused', 'dropped'])
+            ->whereBetween('updated_at', [$startDate, $endDate])
+            ->count();
+
+        // 3. TỔNG HỢP SỐ LƯỢNG HỌC SINH THEO TỪNG KHỐI (Khối 3 -> 12) - Tối ưu 1 query
+        $studentsByGradeRaw = Student::where('status', 'active')
+            ->selectRaw('grade, count(*) as count')
+            ->groupBy('grade')
+            ->pluck('count', 'grade')
+            ->toArray();
+            
+        $studentsByGrade = [];
+        for ($g = 3; $g <= 12; $g++) {
+            $studentsByGrade["Khối $g"] = $studentsByGradeRaw[$g] ?? 0;
+        }
+
+        // 4. HỌC SINH ĐÃ NỘP HỌC PHÍ THÁNG
+        $paidInvoices = Invoice::with('student')
+            ->whereYear('paid_at', $year)
+            ->whereMonth('paid_at', $month)
+            ->orderBy('id', 'desc')
+            ->get();
+
+        $paidStudentIds = $paidInvoices->pluck('student_id')->unique()->toArray();
+
+        // 5. HỌC SINH CHƯA NỘP HỌC PHÍ THÁNG - Tối ưu bằng bulk query
+        $activeStudents = Student::where('status', 'active')->get()->keyBy('id');
+        
+        $unpaidStudentIds = $activeStudents->keys()->diff($paidStudentIds)->toArray();
+        
+        $attendanceCounts = Attendance::whereIn('student_id', $unpaidStudentIds)
+            ->whereBetween('checked_at', [$startDate, $endDate])
+            ->whereIn('status', ['present', 'makeup'])
+            ->selectRaw('student_id, count(*) as count')
+            ->groupBy('student_id')
+            ->pluck('count', 'student_id')
+            ->toArray();
+
+        $allUnpaidInvoices = Invoice::select('student_id', 'final_amount', 'billing_month', 'billing_year')
+            ->where('status', 'unpaid')
+            ->get()
+            ->groupBy('student_id');
+
+        $unpaidStudents = [];
+        $totalUnpaidAmount = 0;
+        
+        $lastMonth = $month - 1;
+        $lastMonthYear = $year;
+        if ($lastMonth == 0) {
+            $lastMonth = 12;
+            $lastMonthYear = $year - 1;
+        }
+
+        foreach ($attendanceCounts as $sId => $sessions) {
+            if ($sessions > 0) {
+                $s = $activeStudents->get($sId);
+                if ($s) {
+                    $unpaidInvoices = $allUnpaidInvoices->get($s->id, collect());
+                    $previousDebt = $unpaidInvoices->sum('final_amount') + ($s->debt ?? 0);
+                    
+                    $lastMonthDebt = 0;
+                    $yearlyDebt = $s->debt ?? 0;
+
+                    foreach ($unpaidInvoices as $inv) {
+                        if ($inv->billing_month == $lastMonth && $inv->billing_year == $lastMonthYear) {
+                            $lastMonthDebt += $inv->final_amount;
+                        } else {
+                            $yearlyDebt += $inv->final_amount;
+                        }
+                    }
+
+                    $expectedFee = $sessions * ($s->price_per_session ?? 130000);
+                    $totalAmount = $expectedFee + $previousDebt;
+
+                    $totalUnpaidAmount += $expectedFee; // Hoặc có thể cộng cả nợ cũ nếu muốn tổng nợ chính xác hơn, giữ nguyên để không đổi logic cũ
+
+                    $unpaidStudents[] = [
+                        'id'             => $s->id,
+                        'student_code'   => $s->student_code,
+                        'full_name'      => $s->full_name,
+                        'grade'          => $s->grade,
+                        'class_type'     => $s->class_type,
+                        'parent_name'    => $s->parent_name,
+                        'parent_phone'   => $s->parent_phone,
+                        'total_sessions' => $sessions,
+                        'expected_fee'   => $expectedFee,
+                        'previous_debt'  => $previousDebt,
+                        'last_month_debt'=> $lastMonthDebt,
+                        'yearly_debt'    => $yearlyDebt,
+                        'total_amount'   => $totalAmount,
+                    ];
+                }
+            }
+        }
+
+        // 6. BIỂU ĐỒ DOANH THU 12 THÁNG - Tối ưu 1 query (MySQL compatible)
+        $monthlyRevenues = Invoice::whereYear('paid_at', $year)
+            ->selectRaw('MONTH(paid_at) as m, sum(amount) as sum')
+            ->groupBy('m')
+            ->pluck('sum', 'm')
+            ->toArray();
+
+        $revenueChart = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $revenueChart[] = [
+                'month'   => "T$m",
+                'revenue' => (float)($monthlyRevenues[$m] ?? $monthlyRevenues[str_pad($m, 2, '0', STR_PAD_LEFT)] ?? 0),
+            ];
+        }
+
+        // 7. BIỂU ĐỒ BIẾN ĐỘNG HỌC SINH (RA/VÀO) 12 THÁNG - Tối ưu
+        // Chúng ta cần lấy số lượng vào và ra cho 12 tháng.
+        // Để tránh 24 queries phức tạp với chu kỳ 20 hàng tháng, ta thực hiện lấy các data và lọc trong collection.
+        $allYearStudentsIn = Student::whereBetween('start_date', [
+            Carbon::createFromDate($year, 1, 20)->subMonth()->addDay()->startOfDay(),
+            Carbon::createFromDate($year, 12, 20)->endOfDay()
+        ])->get(['start_date']);
+        
+        $allYearStudentsOut = Student::whereIn('status', ['paused', 'dropped'])
+            ->whereBetween('updated_at', [
+                Carbon::createFromDate($year, 1, 20)->subMonth()->addDay()->startOfDay(),
+                Carbon::createFromDate($year, 12, 20)->endOfDay()
+            ])->get(['updated_at']);
+
+        $inCounts = array_fill(1, 12, 0);
+        $outCounts = array_fill(1, 12, 0);
+
+        foreach ($allYearStudentsIn as $s) {
+            $sd = Carbon::parse($s->start_date);
+            $m = $sd->day > 20 ? $sd->month + 1 : $sd->month;
+            if ($m == 13) $m = 1; // if Dec 21, it falls into Jan next year, but we might just ignore or put in T1. Let's ignore it for this year's 12 months chart, or map it. Actually if it's next year, the query above doesn't fetch it because endDate is Dec 20. So $m won't be 13 for current year.
+            if ($m > 12) continue;
+            if (isset($inCounts[$m])) $inCounts[$m]++;
+        }
+
+        foreach ($allYearStudentsOut as $s) {
+            $ud = Carbon::parse($s->updated_at);
+            $m = $ud->day > 20 ? $ud->month + 1 : $ud->month;
+            if ($m > 12) continue;
+            if (isset($outCounts[$m])) $outCounts[$m]++;
+        }
+
+        $studentMovementChart = [];
+        for ($m = 1; $m <= 12; $m++) {
+            $studentMovementChart[] = [
+                'month' => "T$m",
+                'in'    => $inCounts[$m],
+                'out'   => $outCounts[$m],
+            ];
+        }
+
+        return response()->json([
+            'month'                 => $month,
+            'year'                  => $year,
+            'total_revenue_month'   => $monthlyRevenue,
+            'total_revenue_year'    => $yearlyRevenue,
+            'total_active_students' => $totalActiveStudents,
+            'students_in_month'     => $studentsInMonth,
+            'students_out_month'    => $studentsOutMonth,
+            'students_by_grade'     => $studentsByGrade,
+            'paid_students_count'   => count($paidStudentIds),
+            'unpaid_students_count' => count($unpaidStudents),
+            'total_unpaid_amount'   => $totalUnpaidAmount,
+            'paid_list'             => $paidInvoices,
+            'unpaid_list'           => $unpaidStudents,
+            'revenue_chart'         => $revenueChart,
+            'student_movement_chart'=> $studentMovementChart,
+        ]);
+    }
+}
