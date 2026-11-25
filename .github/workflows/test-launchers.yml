@@ -18,7 +18,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
-          extensions: gd, zip, pdo_sqlite, mbstring
+          extensions: fileinfo, gd, zip, pdo_sqlite, mbstring
           tools: composer
       - uses: actions/setup-node@v4
         with:
@@ -95,7 +95,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
-          extensions: gd, zip, pdo_sqlite, mbstring
+          extensions: fileinfo, gd, zip, pdo_sqlite, mbstring
           tools: composer
       - uses: actions/setup-node@v4
         with:

@@ -31,8 +31,8 @@ echo.
 echo Cai dat xong. Chay tiep cac file danh so 0 den 6.
 goto end
 :badcomposer
-echo composer install bi loi. Neu thong bao nhac ext-gd hoac ext-zip: mo C:\xampp\php\php.ini,
-echo bo dau ; truoc extension=gd va extension=zip, luu lai roi chay lai file nay.
+echo composer install bi loi. Neu thong bao nhac ext-fileinfo, ext-gd hoac ext-zip: mo C:\xampp\php\php.ini,
+echo bo dau ; truoc extension=fileinfo, extension=gd, extension=zip, luu lai roi chay lai file nay.
 goto end
 :badphp
 echo Can PHP 8.2 tro len co bat extension pdo_sqlite (XAMPP 8.2).
