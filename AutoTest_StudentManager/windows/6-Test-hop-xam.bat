@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal
+set "WIN=%~dp0"
 set "NOPAUSE=1"
 set "LOC=gon"
 set "TXT=%~dp0..\support\hop-xam"
@@ -17,7 +18,7 @@ cls
 type "%TXT%\%1.txt"
 echo.
 echo ---------------- KET QUA CHAY ----------------
-call "%~dp0chay-test-api.bat" baocao %2
+call "%WIN%chay-test-api.bat" baocao %2
 echo.
 echo Nhan phim bat ky de xem tiep...
 pause >nul

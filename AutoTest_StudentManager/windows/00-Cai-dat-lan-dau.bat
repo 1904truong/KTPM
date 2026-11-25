@@ -11,7 +11,7 @@ for %%T in (composer node npm git) do where %%T >nul 2>nul || echo [THIEU] Chua 
 
 echo === 1/3 Thu vien backend
 cd /d "%HERE%..\backend" || goto fail
-call composer install || goto fail
+call composer install || goto badcomposer
 if exist .env goto frontend
 copy .env.example .env >nul
 "%PHP%" artisan key:generate --force || goto fail
@@ -29,6 +29,10 @@ call npx playwright install chromium || goto fail
 
 echo.
 echo Cai dat xong. Chay tiep cac file danh so 0 den 6.
+goto end
+:badcomposer
+echo composer install bi loi. Neu thong bao nhac ext-gd hoac ext-zip: mo C:\xampp\php\php.ini,
+echo bo dau ; truoc extension=gd va extension=zip, luu lai roi chay lai file nay.
 goto end
 :badphp
 echo Can PHP 8.2 tro len co bat extension pdo_sqlite (XAMPP 8.2).

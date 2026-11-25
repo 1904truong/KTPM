@@ -3,6 +3,9 @@
 //   gon     : bỏ đường dẫn file và phần giới thiệu của PHPUnit
 //   api-loi : chỉ giữ test API bị Fail, đánh số thứ tự
 //   ui-loi  : chỉ giữ 9 test giao diện được ghi Fail trong Excel
+if (function_exists('sapi_windows_vt100_support')) {
+    @sapi_windows_vt100_support(STDOUT, true);
+}
 $mode = $argv[1] ?? 'gon';
 $n = 0;
 $failed = false;

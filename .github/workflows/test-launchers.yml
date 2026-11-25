@@ -1,0 +1,149 @@
+name: Test launchers
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "AutoTest_StudentManager/**"
+      - ".github/workflows/test-launchers.yml"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: gd, zip, pdo_sqlite, mbstring
+          tools: composer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Cai dat bang 00-Cai-dat-lan-dau.bat
+        shell: cmd
+        run: |
+          call AutoTest_StudentManager\windows\00-Cai-dat-lan-dau.bat <NUL >00.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "00 Cai dat" 00.log "Cai dat xong" 1
+      - name: "0 API bao cao"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          call AutoTest_StudentManager\windows\0-Test-API-dung-bao-cao.bat <NUL >0.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "0 API bao cao" 0.log "Failures: 4[01]" 1
+      - name: "1 API hien tai"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          call AutoTest_StudentManager\windows\1-Test-API.bat <NUL >1.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "1 API hien tai" 1.log "Failures: 35" 1
+      - name: "2 Demo 5 loi"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          call AutoTest_StudentManager\windows\2-Demo-5-loi.bat <NUL >2.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "2 Demo 5 loi" 2.log "Failures: 1\b" 5
+      - name: "6 Hop xam"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          call AutoTest_StudentManager\windows\6-Test-hop-xam.bat <NUL >3.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "6 Hop xam" 3.log "Failures: 1\b" 2
+      - name: "3 Demo XSS"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          call AutoTest_StudentManager\windows\3-Demo-loi-XSS.bat <NUL >4.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "3 Demo XSS" 4.log "Pass: 3 \| Fail: 1" 1
+      - name: "5 Tat ca loi"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          call AutoTest_StudentManager\windows\5-Tat-ca-loi-trong-Excel.bat <NUL >5.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "5 Tat ca loi" 5.log "(?m)^\S+ (QLHS|QLND|TTHP)_UI_" 9
+      - name: "4 Test giao dien"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          call AutoTest_StudentManager\windows\4-Test-giao-dien.bat <NUL >6.log 2>&1
+          php AutoTest_StudentManager\support\ci-check.php "4 Test giao dien" 6.log "T\S+: 66" 1
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: gd, zip, pdo_sqlite, mbstring
+          tools: composer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Cai dat thu vien
+        run: |
+          cd backend && composer install --no-interaction && cp .env.example .env && php artisan key:generate --force
+          cd ../frontend && npm ci
+          cd ../AutoTest_StudentManager/e2e && npm ci && npx playwright install chromium
+      - name: "0 API bao cao"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          bash AutoTest_StudentManager/mac/0-Test-API-dung-bao-cao.command </dev/null >0.log 2>&1 || true
+          php AutoTest_StudentManager/support/ci-check.php '0 API bao cao' 0.log 'Failures: 4[01]' 1
+      - name: "1 API hien tai"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          bash AutoTest_StudentManager/mac/1-Test-API.command </dev/null >1.log 2>&1 || true
+          php AutoTest_StudentManager/support/ci-check.php '1 API hien tai' 1.log 'Failures: 35' 1
+      - name: "2 Demo 5 loi"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          bash AutoTest_StudentManager/mac/2-Demo-5-loi.command </dev/null >2.log 2>&1 || true
+          php AutoTest_StudentManager/support/ci-check.php '2 Demo 5 loi' 2.log 'Failures: 1\b' 5
+      - name: "6 Hop xam"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          bash AutoTest_StudentManager/mac/6-Test-hop-xam.command </dev/null >3.log 2>&1 || true
+          php AutoTest_StudentManager/support/ci-check.php '6 Hop xam' 3.log 'Failures: 1\b' 2
+      - name: "3 Demo XSS"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          bash AutoTest_StudentManager/mac/3-Demo-loi-XSS.command </dev/null >4.log 2>&1 || true
+          php AutoTest_StudentManager/support/ci-check.php '3 Demo XSS' 4.log 'Pass: 3 \| Fail: 1' 1
+      - name: "5 Tat ca loi"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          bash AutoTest_StudentManager/mac/5-Tat-ca-loi-trong-Excel.command </dev/null >5.log 2>&1 || true
+          php AutoTest_StudentManager/support/ci-check.php '5 Tat ca loi' 5.log '(?m)^✘ (QLHS|QLND|TTHP)_UI_' 9
+      - name: "4 Test giao dien"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          bash AutoTest_StudentManager/mac/4-Test-giao-dien.command </dev/null >6.log 2>&1 || true
+          php AutoTest_StudentManager/support/ci-check.php '4 Test giao dien' 6.log 'Tổng: 66' 1
