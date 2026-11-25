@@ -154,7 +154,7 @@ class StudentController extends Controller
                 $sessionsCount = $presentAttendances->count();
 
                 $s->total_sessions_in_cycle  = $sessionsCount;
-                $s->absent_sessions_in_cycle = $cycleAttendances->where('status', 'absent')->count();
+                $s->absent_sessions_in_cycle = $cycleAttendances->whereIn('status', ['absent_excused', 'absent_unexcused'])->count();
                 $s->total_tuition_in_cycle   = $sessionsCount * ($s->price_per_session ?? 130000);
 
                 $unpaidInvoices = $allUnpaidInvoices->get($s->id, collect());

@@ -309,6 +309,7 @@ class AttendanceController extends Controller
     {
         $list = Attendance::with('student')
             ->whereDate('checked_at', Carbon::today())
+            ->whereIn('status', ['present', 'makeup'])
             ->orderBy('id', 'desc')
             ->get();
 
