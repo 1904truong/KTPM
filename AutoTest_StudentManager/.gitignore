@@ -1,0 +1,7 @@
+.tmp/
+.DS_Store
+e2e/node_modules/
+e2e/shots/
+e2e/results_ui*.json
+e2e/ui.sqlite
+e2e/*.log

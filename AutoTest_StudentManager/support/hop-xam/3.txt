@@ -1,0 +1,10 @@
+KIỂM THỬ HỘP XÁM 3/3 - TTHP_API_40: Từ chối hóa đơn
+
+Mục đích  : Xem việc từ chối giao dịch có được ghi lại không.
+Thao tác  : Tạo hóa đơn chuyển khoản, rồi từ chối qua API.
+Kiểm tra  : Bảng audit_logs (nhật ký thao tác).
+Mong đợi  : Có dòng INVOICE_REJECT.
+Phát hiện : Chỉ có dòng INVOICE_CREATE (BUG_12, mức Trung bình).
+Nguyên nhân: Chức năng từ chối không ghi nhật ký.
+Hậu quả   : Không tra được ai đã từ chối hóa đơn và vào lúc nào.
+Cách sửa  : Thêm bước ghi nhật ký khi từ chối.

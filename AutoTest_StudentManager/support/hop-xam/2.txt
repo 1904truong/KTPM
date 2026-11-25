@@ -1,0 +1,10 @@
+KIỂM THỬ HỘP XÁM 2/3 - QLHS_API_49: Xóa học sinh đã nộp học phí
+
+Mục đích  : Xem xóa học sinh có làm mất dữ liệu tiền đã thu không.
+Thao tác  : Tạo học sinh đã có hóa đơn đã thu, rồi xóa vĩnh viễn.
+Kiểm tra  : Bảng invoices còn hóa đơn không.
+Mong đợi  : Hóa đơn vẫn còn.
+Phát hiện : Bảng hóa đơn trống (BUG_05, mức Cao).
+Nguyên nhân: Cơ sở dữ liệu cài xóa dây chuyền (ON DELETE CASCADE).
+Hậu quả   : Mất lịch sử thu tiền, doanh thu bị sai.
+Cách sửa  : Chặn xóa vĩnh viễn học sinh đã có hóa đơn.

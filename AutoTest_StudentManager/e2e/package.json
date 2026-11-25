@@ -1,0 +1,5 @@
+{
+  "name": "ktpm-e2e",
+  "private": true,
+  "dependencies": { "playwright": "1.48.0" }
+}

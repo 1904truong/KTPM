@@ -1,0 +1,6 @@
+TÓM TẮT KIỂM THỬ HỘP XÁM
+  1. QLHS_API_01  Pass  Thêm học sinh, dữ liệu lưu đúng.
+  2. QLHS_API_49  Fail  Xóa học sinh thì mất luôn hóa đơn.
+  3. TTHP_API_40  Fail  Từ chối hóa đơn mà không để lại dấu vết.
+
+Hai lỗi sau thấy rõ khi mở cơ sở dữ liệu ra kiểm tra.
