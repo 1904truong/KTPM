@@ -29,7 +29,7 @@ class DashboardController extends Controller
         $yearlyRevenue = Invoice::whereYear('paid_at', $year)->sum('amount');
 
         // 2. SĨ SỐ VÀ BIẾN ĐỘNG HỌC SINH
-        $totalActiveStudents = Student::where('status', 'active')->count();
+        $totalActiveStudents = Student::whereIn('status', ['active', 'studying'])->count();
 
         $studentsInMonth = Student::whereBetween('start_date', [$startDate, $endDate])->count();
 
@@ -38,7 +38,7 @@ class DashboardController extends Controller
             ->count();
 
         // 3. TỔNG HỢP SỐ LƯỢNG HỌC SINH THEO TỪNG KHỐI (Khối 3 -> 12) - Tối ưu 1 query
-        $studentsByGradeRaw = Student::where('status', 'active')
+        $studentsByGradeRaw = Student::whereIn('status', ['active', 'studying'])
             ->selectRaw('grade, count(*) as count')
             ->groupBy('grade')
             ->pluck('count', 'grade')
@@ -59,7 +59,7 @@ class DashboardController extends Controller
         $paidStudentIds = $paidInvoices->pluck('student_id')->unique()->toArray();
 
         // 5. HỌC SINH CHƯA NỘP HỌC PHÍ THÁNG - Tối ưu bằng bulk query
-        $activeStudents = Student::where('status', 'active')->get()->keyBy('id');
+        $activeStudents = Student::whereIn('status', ['active', 'studying'])->get()->keyBy('id');
         
         $unpaidStudentIds = $activeStudents->keys()->diff($paidStudentIds)->toArray();
         
@@ -72,7 +72,7 @@ class DashboardController extends Controller
             ->toArray();
 
         $allUnpaidInvoices = Invoice::select('student_id', 'final_amount', 'billing_month', 'billing_year')
-            ->where('status', 'unpaid')
+            ->outstanding()
             ->get()
             ->groupBy('student_id');
 

@@ -65,6 +65,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:view_finance')->group(function () {
         Route::get('/invoices', [InvoiceController::class, 'index']);
         Route::get('/students/{id}/billing-info', [InvoiceController::class, 'getBillingInfo']);
+        Route::post('/students/billing-info/bulk', [InvoiceController::class, 'getBulkBillingInfo']);
     });
     
     Route::middleware('permission:manage_finance')->group(function () {

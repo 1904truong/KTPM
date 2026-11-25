@@ -10,9 +10,15 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use App\Models\AuditLog;
+use App\Services\TuitionService;
+use Illuminate\Validation\ValidationException;
 
 class InvoiceController extends Controller
 {
+    public function __construct(private TuitionService $tuition)
+    {
+    }
+
     private function getSettings()
     {
         $settingsFile = 'settings.json';
@@ -48,20 +54,11 @@ class InvoiceController extends Controller
         // Sinh mã hóa đơn tự động chuẩn POS: HD + Thời gian + ID ngẫu nhiên
         $invoiceCode = 'HD' . date('YmdHis') . rand(10, 99);
 
-        $approvalStatus = $request->payment_method === 'transfer' ? 'pending' : 'approved';
-        $status = $request->payment_method === 'transfer' ? 'unpaid' : 'paid';
-        $paidAt = $request->payment_method === 'transfer' ? null : Carbon::now();
-
-        $invoice = Invoice::create([
-            'invoice_code'   => $invoiceCode,
-            'student_id'     => $student->id,
-            'title'          => $request->title,
-            'amount'         => $request->amount,
-            'payment_method' => $request->payment_method,
-            'status'         => $status,
-            'approval_status'=> $approvalStatus,
-            'paid_at'        => $paidAt,
-        ]);
+        $invoice = DB::transaction(fn () => $this->tuition->createInvoice($student, [
+            'invoice_code' => $invoiceCode,
+            'title'        => $request->title,
+            'amount'       => $request->amount,
+        ], $request->payment_method));
 
         AuditLog::create([
             'user_id' => $request->user()->id,
@@ -111,24 +108,16 @@ class InvoiceController extends Controller
 
         DB::beginTransaction();
         try {
-            $approvalStatus = $request->payment_method === 'transfer' ? 'pending' : 'approved';
-            $status = $request->payment_method === 'transfer' ? 'unpaid' : 'paid';
-            $paidAt = $request->payment_method === 'transfer' ? null : Carbon::now();
 
             foreach ($request->invoices as $invData) {
                 $student = Student::findOrFail($invData['student_id']);
                 $invoiceCode = 'HD' . date('YmdHis') . rand(10, 99) . $student->id;
 
-                $invoice = Invoice::create([
-                    'invoice_code'   => $invoiceCode,
-                    'student_id'     => $student->id,
-                    'title'          => $invData['title'],
-                    'amount'         => $invData['amount'],
-                    'payment_method' => $request->payment_method,
-                    'status'         => $status,
-                    'approval_status'=> $approvalStatus,
-                    'paid_at'        => $paidAt,
-                ]);
+                $invoice = $this->tuition->createInvoice($student, [
+                    'invoice_code' => $invoiceCode,
+                    'title'        => $invData['title'],
+                    'amount'       => $invData['amount'],
+                ], $request->payment_method);
 
                 AuditLog::create([
                     'user_id' => $request->user()->id,
@@ -144,6 +133,9 @@ class InvoiceController extends Controller
                 $studentCodes[] = $student->student_code;
             }
             DB::commit();
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            throw $e;
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['message' => 'Lỗi tạo hóa đơn gộp: ' . $e->getMessage()], 500);
@@ -176,6 +168,28 @@ class InvoiceController extends Controller
         ]);
     }
 
+    // Tính học phí cho nhiều học sinh trong một lần gọi (tránh vượt giới hạn số request/phút)
+    public function getBulkBillingInfo(Request $request)
+    {
+        $data = $request->validate([
+            'student_ids'   => 'required|array|min:1|max:1000',
+            'student_ids.*' => 'integer|distinct',
+            'month'         => 'nullable|integer|between:1,12',
+            'year'          => 'nullable|integer',
+        ]);
+
+        $items = [];
+        foreach ($data['student_ids'] as $id) {
+            $response = $this->getBillingInfo($request, $id);
+            if ($response->getStatusCode() !== 200) {
+                return $response;
+            }
+            $items[] = $response->getData(true);
+        }
+
+        return response()->json($items);
+    }
+
     public function getBillingInfo(Request $request, $id)
     {
         try {
@@ -184,12 +198,10 @@ class InvoiceController extends Controller
             $currentMonth = $request->input('month', Carbon::now()->month);
             $currentYear = $request->input('year', Carbon::now()->year);
             
-            $startDate = Carbon::create($currentYear, $currentMonth, 21)->subMonth()->startOfDay();
-            $endDate = Carbon::create($currentYear, $currentMonth, 20)->endOfDay();
             
             // Bước 1: Nợ cũ
-            $unpaidInvoices = Invoice::where('student_id', $id)
-                ->where('status', 'unpaid')
+            $unpaidInvoices = Invoice::withoutGlobalScopes()->outstanding()
+                ->where('student_id', $id)
                 ->get();
                 
             $previousDebt = $student->debt + $unpaidInvoices->sum('final_amount');
@@ -231,17 +243,11 @@ class InvoiceController extends Controller
             }
 
             // Bước 2: Tiền tháng này
-            $attendedSessions = \App\Models\Attendance::where('student_id', $id)
-                ->whereIn('status', ['present', 'makeup'])
-                ->whereBetween('checked_at', [$startDate->format('Y-m-d H:i:s'), $endDate->format('Y-m-d H:i:s')])
-                ->count();
-                
-            $pricePerSession = collect($student)->get('price_per_session', 130000); // Check if model has it, or DB table
-            // Wait, does students table have price_per_session? 
-            $pricePerSession = $student->price_per_session ?? 130000;
-            
-            $currentFee = $attendedSessions * $pricePerSession;
-            
+            $current = $this->tuition->currentFee($student, (int) $currentMonth, (int) $currentYear);
+            $attendedSessions = $current['sessions'];
+            $pricePerSession = $current['price'];
+            $currentFee = $current['fee'];
+
             // Bước 3: Tổng
             $finalAmount = $previousDebt + $currentFee;
             
@@ -266,35 +272,55 @@ class InvoiceController extends Controller
 
     public function destroy(Request $request, $id)
     {
-        $invoice = Invoice::findOrFail($id);
-        
-        AuditLog::create([
-            'user_id' => $request->user()->id,
-            'student_id' => $invoice->student_id,
-            'action' => 'INVOICE_DELETE',
-            'old_data' => json_encode(['amount' => $invoice->amount, 'status' => $invoice->status]),
-            'reason' => 'Hoàn tác thu tiền',
-        ]);
+        DB::transaction(function () use ($request, $id) {
+            $invoice = Invoice::lockForUpdate()->findOrFail($id);
 
-        $invoice->delete();
+            // Hóa đơn đã được một lần thu sau tất toán thì không được xóa riêng
+            $settledByLater = Invoice::withoutGlobalScopes()
+                ->where('student_id', $invoice->student_id)
+                ->whereNotNull('settlement')
+                ->get()
+                ->contains(fn ($other) => in_array($invoice->id, $other->settlement['invoice_ids']));
+            if ($settledByLater) {
+                throw ValidationException::withMessages([
+                    'invoice' => 'Hóa đơn này đã được gộp vào một lần thu sau. Hãy hoàn tác hóa đơn mới hơn trước.',
+                ]);
+            }
+
+            $this->tuition->revert($invoice);
+
+            AuditLog::create([
+                'user_id' => $request->user()->id,
+                'student_id' => $invoice->student_id,
+                'action' => 'INVOICE_DELETE',
+                'old_data' => json_encode(['amount' => $invoice->amount, 'status' => $invoice->status]),
+                'reason' => 'Hoàn tác thu tiền',
+            ]);
+
+            $invoice->delete();
+        });
+
         return response()->json(['message' => 'Hóa đơn đã được xóa (hoàn tác) thành công.']);
     }
 
     public function approve(Request $request, $id)
     {
-        $invoice = Invoice::findOrFail($id);
-        $invoice->approval_status = 'approved';
-        $invoice->status = 'paid';
-        $invoice->paid_at = Carbon::now();
-        $invoice->save();
-        
-        AuditLog::create([
-            'user_id' => $request->user()->id,
-            'student_id' => $invoice->student_id,
-            'action' => 'INVOICE_APPROVE',
-            'new_data' => json_encode(['status' => 'approved']),
-            'reason' => 'Duyệt hóa đơn chuyển khoản',
-        ]);
+        DB::transaction(function () use ($request, $id) {
+            $invoice = Invoice::lockForUpdate()->findOrFail($id);
+            if ($invoice->approval_status !== 'pending') {
+                throw ValidationException::withMessages(['invoice' => 'Chỉ duyệt được hóa đơn đang chờ duyệt.']);
+            }
+
+            $this->tuition->settle($invoice);
+
+            AuditLog::create([
+                'user_id' => $request->user()->id,
+                'student_id' => $invoice->student_id,
+                'action' => 'INVOICE_APPROVE',
+                'new_data' => json_encode(['status' => 'approved']),
+                'reason' => 'Duyệt hóa đơn chuyển khoản',
+            ]);
+        });
 
         return response()->json(['message' => 'Hóa đơn đã được duyệt.']);
     }
@@ -302,6 +328,9 @@ class InvoiceController extends Controller
     public function reject($id)
     {
         $invoice = Invoice::findOrFail($id);
+        if ($invoice->approval_status !== 'pending') {
+            return response()->json(['message' => 'Chỉ từ chối được hóa đơn đang chờ duyệt.'], 422);
+        }
         $invoice->approval_status = 'rejected';
         $invoice->save();
         return response()->json(['message' => 'Hóa đơn đã bị từ chối.']);

@@ -27,6 +27,18 @@ class Invoice extends Model
         'branch_id'
     ];
 
+    protected $casts = [
+        'settlement' => 'array',
+    ];
+
+    protected $hidden = ['settlement'];
+
+    // Hóa đơn còn nợ: không tính hóa đơn chờ duyệt hoặc bị từ chối
+    public function scopeOutstanding($query)
+    {
+        return $query->where('status', 'unpaid')->where('approval_status', 'approved');
+    }
+
     public function student()
     {
         return $this->belongsTo(Student::class, 'student_id');

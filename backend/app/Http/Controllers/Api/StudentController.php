@@ -120,7 +120,7 @@ class StudentController extends Controller
 
             $allUnpaidInvoices = Invoice::select('student_id', 'final_amount', 'billing_month', 'billing_year')
                 ->whereIn('student_id', $studentIds)
-                ->where('status', 'unpaid')
+                ->outstanding()
                 ->get()
                 ->groupBy('student_id');
 

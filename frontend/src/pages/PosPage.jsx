@@ -176,39 +176,63 @@ export default function PosPage() {
     
     const studentsToAdd = students.filter(s => selectedStudentIds.includes(s.id));
     
-    for (const student of studentsToAdd) {
-        if (cart.find(c => c.student.id === student.id)) continue;
-        
-        const existingInvoice = invoicesHistory.find(inv => {
-          if (inv.student_id !== student.id) return false;
-          if (inv.approval_status === "rejected") return false;
-          const invDate = new Date(inv.paid_at || inv.created_at);
-          return (invDate.getMonth() + 1 === currentMonth && invDate.getFullYear() === currentYear);
-        });
-        if (existingInvoice) continue;
+    const pending = studentsToAdd.filter((student) => {
+      if (cart.find((c) => c.student.id === student.id)) return false;
+      return !invoicesHistory.find((inv) => {
+        if (inv.student_id !== student.id) return false;
+        if (inv.approval_status === "rejected") return false;
+        const invDate = new Date(inv.paid_at || inv.created_at);
+        return invDate.getMonth() + 1 === currentMonth && invDate.getFullYear() === currentYear;
+      });
+    });
 
-        try {
-            const res = await api.get(`/students/${student.id}/billing-info`, {
-                params: { month: currentMonth, year: currentYear },
-            });
-            setCart(prev => [...prev, {
-                student,
-                summary: res.data,
-                amount: res.data.final_amount || 0,
-                title: `Học phí Tháng ${currentMonth}/${currentYear}`
-            }]);
-            successCount++;
-        } catch(err) {
-            console.error("Lỗi tính học phí học sinh " + student.id, err);
+    let noFeeCount = 0;
+    try {
+      if (pending.length > 0) {
+        const res = await api.post("/students/billing-info/bulk", {
+          student_ids: pending.map((s) => s.id),
+          month: currentMonth,
+          year: currentYear,
+        });
+        const summaries = new Map(res.data.map((item) => [item.student_id, item]));
+        const items = [];
+        for (const student of pending) {
+          const summary = summaries.get(student.id);
+          if (!summary) continue;
+          // Hóa đơn tối thiểu 1.000đ, bỏ qua học sinh chưa phát sinh học phí
+          if (Number(summary.final_amount) < 1000) {
+            noFeeCount++;
+            continue;
+          }
+          items.push({
+            student,
+            summary,
+            amount: summary.final_amount,
+            title: `Học phí Tháng ${currentMonth}/${currentYear}`,
+          });
         }
+        setCart((prev) => [
+          ...prev,
+          ...items.filter((i) => !prev.some((c) => c.student.id === i.student.id)),
+        ]);
+        successCount = items.length;
+      }
+    } catch (err) {
+      setIsBulkLoading(false);
+      toast.error("Lỗi tính học phí: " + (err.response?.data?.message || err.message));
+      return;
     }
-    
+
     setIsBulkLoading(false);
     setShowMultiSelectModal(false);
     setSelectedStudentIds([]);
     if (successCount > 0) {
       toast.success(`Đã tự động tính toán và thêm ${successCount} học sinh vào danh sách thu!`);
-    } else {
+    }
+    if (noFeeCount > 0) {
+      toast.warning(`Bỏ qua ${noFeeCount} học sinh chưa phát sinh học phí (0đ).`);
+    }
+    if (successCount === 0 && noFeeCount === 0) {
       toast.warning("Không có học sinh nào được thêm (có thể đã nộp hoặc đã có trong danh sách).");
     }
   };
@@ -454,7 +478,7 @@ export default function PosPage() {
                 </div>
                 <button 
                   onClick={() => {
-                    const filteredIds = students.filter(s => (multiSelectGrade ? s.grade === multiSelectGrade : true)).filter(s => {
+                    const filteredIds = students.filter(s => (multiSelectGrade ? String(s.grade) === multiSelectGrade : true)).filter(s => {
                       const hasInvoice = invoicesHistory.find(inv => {
                         if (inv.student_id !== s.id || inv.approval_status === "rejected") return false;
                         const d = new Date(inv.paid_at || inv.created_at);
@@ -488,7 +512,7 @@ export default function PosPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-                    {students.filter(s => (multiSelectGrade ? s.grade === multiSelectGrade : true)).map(s => {
+                    {students.filter(s => (multiSelectGrade ? String(s.grade) === multiSelectGrade : true)).map(s => {
                       const hasInvoice = invoicesHistory.find(inv => {
                         if (inv.student_id !== s.id || inv.approval_status === "rejected") return false;
                         const d = new Date(inv.paid_at || inv.created_at);
